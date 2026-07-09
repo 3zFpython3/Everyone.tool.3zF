@@ -1,5 +1,5 @@
-import discord
 import asyncio
+import aiohttp
 import sys
 import time
 
@@ -14,63 +14,58 @@ print("="*50)
 print("DEV BY 3zF | SHADOW MODE V99")
 print("="*50)
 
-token = input("[+] Bot Token: ")
+token = input("[+] User Token: ")
 channel_id = int(input("[+] Channel ID: "))
 message = input("[+] Message: ")
 count = int(input("[+] Send Count: "))
 delay = float(input("[+] Delay (seconds): "))
 
 confirm = input("[+] Type 'yes' to confirm: ")
-
 if confirm.lower() != 'yes':
     print("[!] Cancelled.")
     sys.exit()
 
-intents = discord.Intents.default()
-intents.message_content = True
+headers = {
+    "Authorization": token,
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
 
-class ShadowClient(discord.Client):
-    async def on_ready(self):
-        print(f"[+] Logged in as {self.user}")
-        channel = self.get_channel(channel_id)
+payload = {"content": message}
+url = f"https://discord.com/api/v9/channels/{channel_id}/messages"
 
-        if not channel:
-            print("[✗] Channel not found or no permission")
-            await self.close()
-            return
-
-        print(f"[+] Sending to #{channel.name}")
-
+async def main():
+    async with aiohttp.ClientSession(headers=headers) as session:
+        print(f"[+] Sending to channel {channel_id}")
         sent = 0
         retries = 0
-        max_retries = 5
 
         while sent < count:
             try:
-                await channel.send(message)
-                sent += 1
-                retries = 0
-                print(f"[✓] {sent}/{count}")
-                if sent < count:
-                    await asyncio.sleep(delay)
-            except discord.HTTPException as e:
-                if e.status == 429:
-                    retries += 1
-                    retry_after = float(e.response.headers.get("Retry-After", 5))
-                    print(f"[!] Rate limited. Waiting {retry_after}s (attempt {retries}/{max_retries})")
-                    if retries > max_retries:
-                        print("[✗] Max retries exceeded. Stopping.")
+                async with session.post(url, json=payload) as resp:
+                    if resp.status == 200 or resp.status == 201:
+                        sent += 1
+                        retries = 0
+                        print(f"[✓] {sent}/{count}")
+                        if sent < count and delay > 0:
+                            await asyncio.sleep(delay)
+                    elif resp.status == 429:
+                        retries += 1
+                        data = await resp.json()
+                        retry_after = data.get("retry_after", 3)
+                        print(f"[!] Rate limited. Waiting {retry_after}s ({retries}/5)")
+                        if retries > 5:
+                            print("[✗] Max retries. Stopping.")
+                            break
+                        await asyncio.sleep(retry_after + 0.3)
+                    else:
+                        text = await resp.text()
+                        print(f"[✗] HTTP {resp.status}: {text}")
                         break
-                    await asyncio.sleep(retry_after + 0.5)
-                else:
-                    print(f"[✗] HTTP Error {e.status}: {e}")
-                    break
             except Exception as e:
                 print(f"[✗] Error: {e}")
                 break
 
         print("[+] Mission Complete.")
-        await self.close()
 
-client = ShadowClient(intents=intents)
-client.run(token)
+asyncio.run(main())
