@@ -1,7 +1,6 @@
 import asyncio
 import aiohttp
 import sys
-import time
 
 print(r"""
  _   _       ____                 
@@ -11,14 +10,14 @@ print(r"""
 |_| |_|\__,_|_____|\___\___|_|    
 """)
 print("="*50)
-print("DEV BY 3zF | SHADOW MODE V99")
+print("DEV BY 3zF | SHADOW MODE V99 | TURBO ASYNC")
 print("="*50)
 
 token = input("[+] User Token: ")
 channel_id = int(input("[+] Channel ID: "))
 message = input("[+] Message: ")
 count = int(input("[+] Send Count: "))
-delay = float(input("[+] Delay (seconds): "))
+concurrent = int(input("[+] Concurrent sends (1-50) [20]: ") or "20")
 
 confirm = input("[+] Type 'yes' to confirm: ")
 if confirm.lower() != 'yes':
@@ -31,41 +30,36 @@ headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
 
-payload = {"content": message}
 url = f"https://discord.com/api/v9/channels/{channel_id}/messages"
+payload = {"content": message}
+
+sent = 0
+sem = asyncio.Semaphore(int(concurrent))
+
+async def send_one(session):
+    global sent
+    async with sem:
+        try:
+            async with session.post(url, json=payload) as resp:
+                if resp.status in [200, 201]:
+                    sent += 1
+                    print(f"[✓] {sent}/{count}")
+                elif resp.status == 429:
+                    data = await resp.json()
+                    await asyncio.sleep(data.get("retry_after", 2))
+                else:
+                    print(f"[✗] {resp.status}")
+        except:
+            pass
 
 async def main():
-    async with aiohttp.ClientSession(headers=headers) as session:
-        print(f"[+] Sending to channel {channel_id}")
-        sent = 0
-        retries = 0
-
-        while sent < count:
-            try:
-                async with session.post(url, json=payload) as resp:
-                    if resp.status == 200 or resp.status == 201:
-                        sent += 1
-                        retries = 0
-                        print(f"[✓] {sent}/{count}")
-                        if sent < count and delay > 0:
-                            await asyncio.sleep(delay)
-                    elif resp.status == 429:
-                        retries += 1
-                        data = await resp.json()
-                        retry_after = data.get("retry_after", 3)
-                        print(f"[!] Rate limited. Waiting {retry_after}s ({retries}/5)")
-                        if retries > 5:
-                            print("[✗] Max retries. Stopping.")
-                            break
-                        await asyncio.sleep(retry_after + 0.3)
-                    else:
-                        text = await resp.text()
-                        print(f"[✗] HTTP {resp.status}: {text}")
-                        break
-            except Exception as e:
-                print(f"[✗] Error: {e}")
-                break
-
-        print("[+] Mission Complete.")
+    global sent
+    connector = aiohttp.TCPConnector(limit=0, force_close=True)
+    async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
+        tasks = []
+        for _ in range(count):
+            tasks.append(send_one(session))
+        await asyncio.gather(*tasks)
+    print(f"[+] Done. Sent: {sent}")
 
 asyncio.run(main())
