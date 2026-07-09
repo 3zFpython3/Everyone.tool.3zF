@@ -16,7 +16,7 @@ print("="*50)
 
 token = input("[+] Bot Token: ")
 channel_id = int(input("[+] Channel ID: "))
-message = input("[+] Message: "))
+message = input("[+] Message: ")
 count = int(input("[+] Send Count: "))
 delay = float(input("[+] Delay (seconds): "))
 
@@ -27,30 +27,50 @@ if confirm.lower() != 'yes':
     sys.exit()
 
 intents = discord.Intents.default()
-client = discord.Client(intents=intents)
+intents.message_content = True
 
-@client.event
-async def on_ready():
-    print(f"[+] Logged in as {client.user}")
-    channel = client.get_channel(channel_id)
-    
-    if not channel:
-        print("[✗] Channel not found or no permission")
-        await client.close()
-        return
-    
-    print(f"[+] Sending to {channel.name}")
-    
-    for i in range(1, count + 1):
-        try:
-            await channel.send(message)
-            print(f"[✓] {i}/{count}")
-            await asyncio.sleep(delay)
-        except Exception as e:
-            print(f"[✗] Error: {e}")
-            break
-    
-    print("[+] Mission Complete.")
-    await client.close()
+class ShadowClient(discord.Client):
+    async def on_ready(self):
+        print(f"[+] Logged in as {self.user}")
+        channel = self.get_channel(channel_id)
 
+        if not channel:
+            print("[✗] Channel not found or no permission")
+            await self.close()
+            return
+
+        print(f"[+] Sending to #{channel.name}")
+
+        sent = 0
+        retries = 0
+        max_retries = 5
+
+        while sent < count:
+            try:
+                await channel.send(message)
+                sent += 1
+                retries = 0
+                print(f"[✓] {sent}/{count}")
+                if sent < count:
+                    await asyncio.sleep(delay)
+            except discord.HTTPException as e:
+                if e.status == 429:
+                    retries += 1
+                    retry_after = float(e.response.headers.get("Retry-After", 5))
+                    print(f"[!] Rate limited. Waiting {retry_after}s (attempt {retries}/{max_retries})")
+                    if retries > max_retries:
+                        print("[✗] Max retries exceeded. Stopping.")
+                        break
+                    await asyncio.sleep(retry_after + 0.5)
+                else:
+                    print(f"[✗] HTTP Error {e.status}: {e}")
+                    break
+            except Exception as e:
+                print(f"[✗] Error: {e}")
+                break
+
+        print("[+] Mission Complete.")
+        await self.close()
+
+client = ShadowClient(intents=intents)
 client.run(token)
